@@ -1,0 +1,156 @@
+#!/bin/bash
+
+# --- Main ---
+asyncproc_start() {
+    asyncproc_init
+    asyncproc_say "Starting..."
+    asyncproc_handler_ec_start
+    asyncproc_handler_stdout_start
+    asyncproc_handler_stderr_start
+    asyncproc_say "Ready to run processes"
+}
+
+asyncproc_init() {
+    asyncproc_conf
+    declare -F asyncproc_conf_local &> /dev/null && asyncproc_conf_local || :
+
+    mkfifo -m 600 ${ASYNCPROC_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_INPUT}"
+}
+
+asyncproc_conf() {
+    asyncproc_basename="$(basename -s .sh $0)"
+    export ASYNCPROC_INPUT="/tmp/${asyncproc_basename}-asyncproc.pipe"
+    asyncproc_say_pre='$(date "+%Y-%m-%d %H:%M:%S") ${asyncproc_basename} [asyncproc/$BASHPID]: '
+    asyncproc_err_pre="error: "
+    asyncproc_die_exitcode="1"
+}
+
+asyncproc_exit() {
+    local _pid
+
+    echo "Hello from the main exit hook"
+    echo "Ec:  ${asyncproc_handler_ec_pid}"
+    echo "Out: ${asyncproc_handler_stdout_pid}"
+    echo "Err: ${asyncproc_handler_stderr_pid}"
+
+    # The Normal stop cycle 
+#    for _pid in ${asyncproc_handler_ec_pid} ${asyncproc_handler_stdout_pid} ${asyncproc_handler_stderr_pid}
+#    do
+#        if ps -p ${_pid}; then
+#            kill -TERM ${_pid}
+#            ( sleep 5; kill -KILL ${_pid} )&
+#
+#        fi
+#    done
+
+    rm -f ${ASYNCPROC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_INPUT}"
+    asyncproc_say "Stopped"
+}
+
+asyncproc_run() {
+    :
+}
+
+# --- Exit Code handler ---
+asyncproc_handler_ec_start() {
+    asyncproc_handler_ec_init
+    (
+        trap asyncproc_handler_ec_exit EXIT
+        asyncproc_say "Hello from ec handler $BASHPID"            
+        sleep 4
+    )&
+    asyncproc_handler_ec_pid="$!"
+    asyncproc_say "Exitcode handler has been started as ${asyncproc_handler_ec_pid}"
+}
+
+asyncproc_handler_ec_init() {
+    asyncproc_handler_ec_conf
+    declare -F asyncproc_handler_ec_conf_local &> /dev/null && asyncproc_handler_ec_conf_local || :
+
+    mkfifo -m 600 ${ASYNCPROC_HANDLER_EC_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_EC_INPUT}"
+}
+
+asyncproc_handler_ec_conf() {
+    asyncproc_handler_ec_pid="0"
+    export ASYNCPROC_HANDLER_EC_INPUT="/tmp/${asyncproc_basename}-asyncproc-ec.pipe"
+}
+
+asyncproc_handler_ec_exit() {
+    rm -f ${ASYNCPROC_HANDLER_EC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_EC_INPUT}"
+    asyncproc_say "Exitcode handler has exited"
+}
+
+
+# --- Stdout handler ---
+asyncproc_handler_stdout_start() {
+    asyncproc_handler_stdout_init
+    (
+        trap asyncproc_handler_stdout_exit EXIT
+        asyncproc_say "Hello from stdout handler $BASHPID"
+        sleep 5
+    )&
+    asyncproc_handler_stdout_pid="$!"
+    asyncproc_say "Stdout handler has been started as ${asyncproc_handler_stdout_pid}" 
+}
+
+asyncproc_handler_stdout_init() {
+    asyncproc_handler_stdout_conf
+    declare -F asyncproc_handler_stdout_conf_local &> /dev/null && asyncproc_handler_stdout_conf_local || :
+
+    mkfifo -m 600 ${ASYNCPROC_HANDLER_STDOUT_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
+}
+
+asyncproc_handler_stdout_conf() {
+    asyncproc_handler_stdout_pid="0"
+    export ASYNCPROC_HANDLER_STDOUT_INPUT="/tmp/${asyncproc_basename}-asyncproc-stdout.pipe"
+}
+
+asyncproc_handler_stdout_exit() {
+    rm -f ${ASYNCPROC_HANDLER_STDOUT_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
+    asyncproc_say "Stdout handler has exited"
+}
+
+
+# --- Stderr handler ---
+asyncproc_handler_stderr_start() {
+    asyncproc_handler_stderr_init
+    (
+        trap asyncproc_handler_stderr_exit EXIT
+        asyncproc_say "Hello from stderr handler $BASHPID"
+        sleep 6
+    )&
+    asyncproc_handler_stderr_pid="$!"
+    asyncproc_say "Stderr handler has been started as ${asyncproc_handler_stderr_pid}" 
+}
+
+asyncproc_handler_stderr_init() {
+    asyncproc_handler_stderr_conf
+    declare -F asyncproc_handler_stderr_conf_local &> /dev/null && asyncproc_handler_stderr_conf_local || :
+
+    mkfifo -m 600 ${ASYNCPROC_HANDLER_STDERR_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_STDERR_INPUT}"
+}
+
+asyncproc_handler_stderr_conf() {
+    asyncproc_handler_stderr_pid="0"
+    export ASYNCPROC_HANDLER_STDERR_INPUT="/tmp/${asyncproc_basename}-asyncproc-stderr.pipe"
+}
+
+asyncproc_handler_stderr_exit() {
+    rm -f ${ASYNCPROC_HANDLER_STDERR_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_STDERR_INPUT}"
+    asyncproc_say "Stderr handler has exited"
+}
+
+# --- Common functions ---
+asyncproc_say() {
+    [ "${ASYNCPROC_VERBOSE}" = "true" ] && eval echo "${asyncproc_say_pre}$@${asyncproc_say_suf}"
+}
+
+asyncproc_err() {
+    [ "${ASYNCPROC_ERRORS}" = "true" ] && asyncproc_say "${asyncproc_err_pre}$@${asyncproc_err_suf}" >&2
+}
+
+asyncproc_die() {
+    asyncproc_err "${asyncproc_die_pre}$@${asyncproc_die_suf}"
+    exit ${asyncproc_die_exitcode}
+}
+
