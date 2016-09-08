@@ -153,22 +153,16 @@ asyncproc_term_procs() {
     _timeout=$1; shift
     read -a _pids <<< "$@"
 
-    while [[ -n "${!_pids[*]}" ]]
-    do
-        for _pid_k in ${!_pids[*]}
-        do
-            if [[ -z "${_pids[${_pid_k}]}" ]] || [[ ${_pids[${_pid_k}]} -eq 0 ]]
-            then
+    while [[ -n "${!_pids[*]}" ]]; do
+        for _pid_k in ${!_pids[*]}; do
+            if [[ -z "${_pids[${_pid_k}]}" ]] || [[ ${_pids[${_pid_k}]} -eq 0 ]]; then
                 unset _pids[${_pid_k}]
                 continue
             fi
             
 
-            if ps -p ${_pids[${_pid_k}]} &>/dev/null
-            then
-                if [[ -n "${_watchdog[${_pids[${_pid_k}]}]}" ]] && \
-                   [[ ${_watchdog[${_pids[${_pid_k}]}]} -gt 0 ]]
-                then
+            if ps -p ${_pids[${_pid_k}]} &>/dev/null; then
+                if [[ -n "${_watchdog[${_pids[${_pid_k}]}]}" ]] && [[ ${_watchdog[${_pids[${_pid_k}]}]} -gt 0 ]]; then
                     :
                 else
                     kill -TERM ${_pids[${_pid_k}]}
