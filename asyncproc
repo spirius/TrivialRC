@@ -25,43 +25,11 @@ asyncproc_conf() {
     asyncproc_err_pre="error: "
     asyncproc_die_exitcode="1"
     asyncproc_handlers=()
+    asyncproc_term_timeout="6"
 }
 
 asyncproc_exit() {
-    local _pid_k _wd=()
-
-    while [[ -n "${!asyncproc_handlers[*]}" ]]
-    do
-        for _pid_k in ${!asyncproc_handlers[*]}
-        do
-            if [[ -z "${asyncproc_handlers[${_pid_k}]}" ]] || [[ ${asyncproc_handlers[${_pid_k}]} -eq 0 ]]
-            then
-                unset asyncproc_handlers[${_pid_k}]
-                continue
-            fi
-            
-
-            if ps -p ${asyncproc_handlers[${_pid_k}]} &>/dev/null
-            then
-                if [[ -n "${_wd[${asyncproc_handlers[${_pid_k}]}]}" ]] && \
-                   [[ ${_wd[${asyncproc_handlers[${_pid_k}]}]} -gt 0 ]]
-                then
-                    :
-                else
-                    kill -TERM ${asyncproc_handlers[${_pid_k}]}
-                    ( sleep 6; kill -KILL ${asyncproc_handlers[${_pid_k}]} )&
-                    # saving watchdog's PID in the index of process' PID
-                    _wd[${asyncproc_handlers[${_pid_k}]}]=$!
-                fi
-            else 
-                ps -p ${_wd[${asyncproc_handlers[${_pid_k}]}]} &>/dev/null && kill -TERM ${_wd[${asyncproc_handlers[${_pid_k}]}]}
-                unset _wd[${asyncproc_handlers[${_pid_k}]}]
-                unset asyncproc_handlers[${_pid_k}]
-            fi
-        done
-        sleep 1
-    done
-
+    asyncproc_term_procs ${asyncproc_term_timeout} ${asyncproc_handlers[*]} &>/dev/null
     rm -f ${ASYNCPROC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_INPUT}"
     asyncproc_say "Stopped"
 }
@@ -179,3 +147,42 @@ asyncproc_die() {
     exit ${asyncproc_die_exitcode}
 }
 
+asyncproc_term_procs() {
+    local _timeout _pid_k _pids=() _watchdog=()
+
+    _timeout=$1; shift
+    read -a _pids <<< "$@"
+
+    while [[ -n "${!_pids[*]}" ]]
+    do
+        for _pid_k in ${!_pids[*]}
+        do
+            if [[ -z "${_pids[${_pid_k}]}" ]] || [[ ${_pids[${_pid_k}]} -eq 0 ]]
+            then
+                unset _pids[${_pid_k}]
+                continue
+            fi
+            
+
+            if ps -p ${_pids[${_pid_k}]} &>/dev/null
+            then
+                if [[ -n "${_watchdog[${_pids[${_pid_k}]}]}" ]] && \
+                   [[ ${_watchdog[${_pids[${_pid_k}]}]} -gt 0 ]]
+                then
+                    :
+                else
+                    kill -TERM ${_pids[${_pid_k}]}
+                    ( sleep ${_timeout}; kill -KILL ${_pids[${_pid_k}]} )&
+                    # saving watchdog's PID in the index of process' PID
+                    _watchdog[${_pids[${_pid_k}]}]=$!
+                fi
+            else 
+                ps -p ${_watchdog[${_pids[${_pid_k}]}]} &>/dev/null && kill -TERM ${_watchdog[${_pids[${_pid_k}]}]}
+                unset _wd[${_pids[${_pid_k}]}]
+                unset _pids[${_pid_k}]
+            fi
+        done
+        sleep 1
+    done
+
+}
