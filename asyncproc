@@ -19,29 +19,48 @@ asyncproc_init() {
 
 asyncproc_conf() {
     asyncproc_basename="$(basename -s .sh $0)"
+    asyncproc_namespace="main"
     export ASYNCPROC_INPUT="/tmp/${asyncproc_basename}-asyncproc.pipe"
-    asyncproc_say_pre='$(date "+%Y-%m-%d %H:%M:%S") ${asyncproc_basename} [asyncproc/$BASHPID]: '
+    asyncproc_say_pre='$(date "+%Y-%m-%d %H:%M:%S") ${asyncproc_basename} [asyncproc-${asyncproc_namespace}/$BASHPID]: '
     asyncproc_err_pre="error: "
     asyncproc_die_exitcode="1"
+    asyncproc_handlers=()
 }
 
 asyncproc_exit() {
-    local _pid
+    local _pid_k _wd=()
 
-    echo "Hello from the main exit hook"
-    echo "Ec:  ${asyncproc_handler_ec_pid}"
-    echo "Out: ${asyncproc_handler_stdout_pid}"
-    echo "Err: ${asyncproc_handler_stderr_pid}"
+    while [[ -n "${!asyncproc_handlers[*]}" ]]
+    do
+        for _pid_k in ${!asyncproc_handlers[*]}
+        do
+            if [[ -z "${asyncproc_handlers[${_pid_k}]}" ]] || [[ ${asyncproc_handlers[${_pid_k}]} -eq 0 ]]
+            then
+                unset asyncproc_handlers[${_pid_k}]
+                continue
+            fi
+            
 
-    # The Normal stop cycle 
-#    for _pid in ${asyncproc_handler_ec_pid} ${asyncproc_handler_stdout_pid} ${asyncproc_handler_stderr_pid}
-#    do
-#        if ps -p ${_pid}; then
-#            kill -TERM ${_pid}
-#            ( sleep 5; kill -KILL ${_pid} )&
-#
-#        fi
-#    done
+            if ps -p ${asyncproc_handlers[${_pid_k}]} &>/dev/null
+            then
+                if [[ -n "${_wd[${asyncproc_handlers[${_pid_k}]}]}" ]] && \
+                   [[ ${_wd[${asyncproc_handlers[${_pid_k}]}]} -gt 0 ]]
+                then
+                    :
+                else
+                    kill -TERM ${asyncproc_handlers[${_pid_k}]}
+                    ( sleep 6; kill -KILL ${asyncproc_handlers[${_pid_k}]} )&
+                    # saving watchdog's PID in the index of process' PID
+                    _wd[${asyncproc_handlers[${_pid_k}]}]=$!
+                fi
+            else 
+                ps -p ${_wd[${asyncproc_handlers[${_pid_k}]}]} &>/dev/null && kill -TERM ${_wd[${asyncproc_handlers[${_pid_k}]}]}
+                unset _wd[${asyncproc_handlers[${_pid_k}]}]
+                unset asyncproc_handlers[${_pid_k}]
+            fi
+        done
+        sleep 1
+    done
 
     rm -f ${ASYNCPROC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_INPUT}"
     asyncproc_say "Stopped"
@@ -56,11 +75,13 @@ asyncproc_handler_ec_start() {
     asyncproc_handler_ec_init
     (
         trap asyncproc_handler_ec_exit EXIT
-        asyncproc_say "Hello from ec handler $BASHPID"            
-        sleep 4
+        asyncproc_namespace="ec"
+        asyncproc_say "Ready to receive exit codes at ${ASYNCPROC_HANDLER_EC_INPUT}"
+
+        sleep 14
     )&
-    asyncproc_handler_ec_pid="$!"
-    asyncproc_say "Exitcode handler has been started as ${asyncproc_handler_ec_pid}"
+    asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
+    asyncproc_say "Exitcode handler has been started as ${asyncproc_handlers[-1]}"
 }
 
 asyncproc_handler_ec_init() {
@@ -86,11 +107,13 @@ asyncproc_handler_stdout_start() {
     asyncproc_handler_stdout_init
     (
         trap asyncproc_handler_stdout_exit EXIT
-        asyncproc_say "Hello from stdout handler $BASHPID"
-        sleep 5
+        asyncproc_namespace="stdout"
+        asyncproc_say "Ready to receive stdouts at ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
+
+        sleep 15
     )&
-    asyncproc_handler_stdout_pid="$!"
-    asyncproc_say "Stdout handler has been started as ${asyncproc_handler_stdout_pid}" 
+    asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
+    asyncproc_say "Stdout handler has been started as ${asyncproc_handlers[-1]}" 
 }
 
 asyncproc_handler_stdout_init() {
@@ -116,11 +139,13 @@ asyncproc_handler_stderr_start() {
     asyncproc_handler_stderr_init
     (
         trap asyncproc_handler_stderr_exit EXIT
-        asyncproc_say "Hello from stderr handler $BASHPID"
-        sleep 6
+        asyncproc_namespace="stderr"
+        asyncproc_say "Ready to receive stderrs at ${ASYNCPROC_HANDLER_STDERR_INPUT}"
+
+        sleep 16
     )&
-    asyncproc_handler_stderr_pid="$!"
-    asyncproc_say "Stderr handler has been started as ${asyncproc_handler_stderr_pid}" 
+    asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
+    asyncproc_say "Stderr handler has been started as ${asyncproc_handlers[-1]}" 
 }
 
 asyncproc_handler_stderr_init() {
