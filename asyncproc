@@ -15,6 +15,7 @@ asyncproc_init() {
     declare -F asyncproc_conf_local &> /dev/null && asyncproc_conf_local || :
 
     mkfifo -m 600 ${ASYNCPROC_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_INPUT}"
+    exec 5<>${ASYNCPROC_INPUT}
 }
 
 asyncproc_conf() {
@@ -23,14 +24,31 @@ asyncproc_conf() {
     export ASYNCPROC_INPUT="/tmp/${asyncproc_basename}-asyncproc.pipe"
     asyncproc_say_pre='$(date "+%Y-%m-%d %H:%M:%S") ${asyncproc_basename} [asyncproc-${asyncproc_namespace}/$BASHPID]: '
     asyncproc_err_pre="error: "
-    asyncproc_die_exitcode="1"
+    asyncproc_die_exitcode="13"
     asyncproc_handlers=()
-    asyncproc_term_timeout="6"
+    asyncproc_kill_timeout="16"
+    asyncproc_async_pids=()
+
+    asyncproc_workers=()
+    asyncproc_exitcodes=()
+    asyncproc_stdouts=()
+    asyncproc_stderrs=()
 }
 
 asyncproc_exit() {
-    asyncproc_term_procs ${asyncproc_term_timeout} ${asyncproc_handlers[*]} &>/dev/null
+    asyncproc_get_exitcodes "close"
+    asyncproc_get_stdouts "close"
+    asyncproc_get_stderrs "close"
+
+    asyncproc_term_procs ${asyncproc_kill_timeout} ${asyncproc_handlers[*]} &>/dev/null
+    
+    exec 5>&-
     rm -f ${ASYNCPROC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_INPUT}"
+
+    asyncproc_say "Workers: ${asyncproc_workers[*]}"
+    asyncproc_say "Exit codes: ${asyncproc_exitcodes[*]}"
+    asyncproc_say "Files with Stdout: ${asyncproc_stdouts[*]}"
+    asyncproc_say "Files with Stderr: ${asyncproc_stderrs[*]}"
     asyncproc_say "Stopped"
 }
 
@@ -44,9 +62,26 @@ asyncproc_handler_ec_start() {
     (
         trap asyncproc_handler_ec_exit EXIT
         asyncproc_namespace="ec"
+        local _pid _ec _ec_k _ecs=()
+
         asyncproc_say "Ready to receive exit codes at ${ASYNCPROC_HANDLER_EC_INPUT}"
 
-        sleep 14
+        while :; do
+            [[ -p ${ASYNCPROC_HANDLER_EC_INPUT} ]] || asyncproc_die "Cannot read from ${ASYNCPROC_HANDLER_EC_INPUT}"
+            read -u 6 _pid _ec
+            if [[ -n "${_pid}" ]]; then
+                if [[ "${_pid}" = "dump" ]] || [[ "${_pid}" = "close" ]]; then
+                    for _ec_k in ${!_ecs[*]}; do
+                        echo "${_ec_k} ${_ecs[${_ec_k}]}" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                        unset _ecs[${_ec_k}]
+                    done
+                    echo "end" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                    [[ "${_pid}" = "close" ]] && exit
+                elif [[ ${_pid} -gt 0 ]] && [[ -n "${_ec}" ]] && [[ ${_ec} -ge 0 ]]; then
+                    _ecs[${_pid}]=${_ec}
+                fi
+            fi
+        done
     )&
     asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
     asyncproc_say "Exitcode handler has been started as ${asyncproc_handlers[-1]}"
@@ -57,14 +92,15 @@ asyncproc_handler_ec_init() {
     declare -F asyncproc_handler_ec_conf_local &> /dev/null && asyncproc_handler_ec_conf_local || :
 
     mkfifo -m 600 ${ASYNCPROC_HANDLER_EC_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_EC_INPUT}"
+    exec 6<>${ASYNCPROC_HANDLER_EC_INPUT}
 }
 
 asyncproc_handler_ec_conf() {
-    asyncproc_handler_ec_pid="0"
     export ASYNCPROC_HANDLER_EC_INPUT="/tmp/${asyncproc_basename}-asyncproc-ec.pipe"
 }
 
 asyncproc_handler_ec_exit() {
+    exec 6>&-
     rm -f ${ASYNCPROC_HANDLER_EC_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_EC_INPUT}"
     asyncproc_say "Exitcode handler has exited"
 }
@@ -76,9 +112,26 @@ asyncproc_handler_stdout_start() {
     (
         trap asyncproc_handler_stdout_exit EXIT
         asyncproc_namespace="stdout"
+        local _pid _stdout _stdout_k _stdouts=()
+
         asyncproc_say "Ready to receive stdouts at ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
 
-        sleep 15
+        while :; do
+            [[ -p ${ASYNCPROC_HANDLER_STDOUT_INPUT} ]] || asyncproc_die "Cannot read from ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
+            read -u 7 _pid _stdout
+            if [[ -n "${_pid}" ]]; then
+                if [[ "${_pid}" = "dump" ]] || [[ "${_pid}" = "close" ]]; then
+                    for _stdout_k in ${!_stdouts[*]}; do
+                        echo "${_stdout_k} \"${_stdouts[${_stdout_k}]}\"" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                        unset _stdouts[${_stdout_k}]
+                    done
+                    echo "end" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                    [[ "${_pid}" = "close" ]] && exit
+                elif [[ ${_pid} -gt 0 ]] && [[ -n "${_stdout}" ]]; then
+                    _stdouts[${_pid}]="${_stdout}"
+                fi
+            fi
+        done
     )&
     asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
     asyncproc_say "Stdout handler has been started as ${asyncproc_handlers[-1]}" 
@@ -89,14 +142,15 @@ asyncproc_handler_stdout_init() {
     declare -F asyncproc_handler_stdout_conf_local &> /dev/null && asyncproc_handler_stdout_conf_local || :
 
     mkfifo -m 600 ${ASYNCPROC_HANDLER_STDOUT_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
+    exec 7<>${ASYNCPROC_HANDLER_STDOUT_INPUT}
 }
 
 asyncproc_handler_stdout_conf() {
-    asyncproc_handler_stdout_pid="0"
     export ASYNCPROC_HANDLER_STDOUT_INPUT="/tmp/${asyncproc_basename}-asyncproc-stdout.pipe"
 }
 
 asyncproc_handler_stdout_exit() {
+    exec 7>&-
     rm -f ${ASYNCPROC_HANDLER_STDOUT_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_STDOUT_INPUT}"
     asyncproc_say "Stdout handler has exited"
 }
@@ -108,9 +162,26 @@ asyncproc_handler_stderr_start() {
     (
         trap asyncproc_handler_stderr_exit EXIT
         asyncproc_namespace="stderr"
+        local _pid _stderr _stderr_k _stderrs=()
+
         asyncproc_say "Ready to receive stderrs at ${ASYNCPROC_HANDLER_STDERR_INPUT}"
 
-        sleep 16
+        while :; do
+            [[ -p ${ASYNCPROC_HANDLER_STDERR_INPUT} ]] || asyncproc_die "Cannot read from ${ASYNCPROC_HANDLER_STDERR_INPUT}"
+            read -u 8 _pid _stderr
+            if [[ -n "${_pid}" ]]; then
+                if [[ "${_pid}" = "dump" ]] || [[ "${_pid}" = "close" ]]; then
+                    for _stderr_k in ${!_stderrs[*]}; do
+                        echo "${_stderr_k} ${_stderrs[${_stderr_k}]}" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                        unset _stderrs[${_stderr_k}]
+                    done
+                    echo "end" > ${ASYNCPROC_INPUT} || asyncproc_die "Cannot write to ${ASYNCPROC_INPUT}"
+                    [[ "${_pid}" = "close" ]] && exit
+                elif [[ ${_pid} -gt 0 ]] && [[ -n "${_stderr}" ]]; then
+                    _stderrs[${_pid}]="${_stderr}"
+                fi
+            fi
+        done
     )&
     asyncproc_handlers[${#asyncproc_handlers[*]}]=$!
     asyncproc_say "Stderr handler has been started as ${asyncproc_handlers[-1]}" 
@@ -121,25 +192,28 @@ asyncproc_handler_stderr_init() {
     declare -F asyncproc_handler_stderr_conf_local &> /dev/null && asyncproc_handler_stderr_conf_local || :
 
     mkfifo -m 600 ${ASYNCPROC_HANDLER_STDERR_INPUT} &> /dev/null || asyncproc_die "Cannot create ${ASYNCPROC_HANDLER_STDERR_INPUT}"
+    exec 8<>${ASYNCPROC_HANDLER_STDERR_INPUT}
 }
 
 asyncproc_handler_stderr_conf() {
-    asyncproc_handler_stderr_pid="0"
     export ASYNCPROC_HANDLER_STDERR_INPUT="/tmp/${asyncproc_basename}-asyncproc-stderr.pipe"
 }
 
 asyncproc_handler_stderr_exit() {
+    exec 8>&-
     rm -f ${ASYNCPROC_HANDLER_STDERR_INPUT} || asyncproc_err "Cannot remove ${ASYNCPROC_HANDLER_STDERR_INPUT}"
     asyncproc_say "Stderr handler has exited"
 }
 
 # --- Common functions ---
 asyncproc_say() {
-    [ "${ASYNCPROC_VERBOSE}" = "true" ] && eval echo "${asyncproc_say_pre}$@${asyncproc_say_suf}"
+    if [[ "${ASYNCPROC_VERBOSE}" = "true" ]]; then
+        eval echo "${asyncproc_say_pre}$@${asyncproc_say_suf}"
+    fi
 }
 
 asyncproc_err() {
-    [ "${ASYNCPROC_ERRORS}" = "true" ] && asyncproc_say "${asyncproc_err_pre}$@${asyncproc_err_suf}" >&2
+    asyncproc_say "${asyncproc_err_pre}$@${asyncproc_err_suf}" >&2
 }
 
 asyncproc_die() {
@@ -148,9 +222,9 @@ asyncproc_die() {
 }
 
 asyncproc_term_procs() {
-    local _timeout _pid_k _pids=() _watchdog=()
+    local _kill_timeout _pid_k _pids=() _watchdog=()
 
-    _timeout=$1; shift
+    _kill_timeout=$1; shift
     read -a _pids <<< "$@"
 
     while [[ -n "${!_pids[*]}" ]]; do
@@ -160,13 +234,12 @@ asyncproc_term_procs() {
                 continue
             fi
             
-
             if ps -p ${_pids[${_pid_k}]} &>/dev/null; then
                 if [[ -n "${_watchdog[${_pids[${_pid_k}]}]}" ]] && [[ ${_watchdog[${_pids[${_pid_k}]}]} -gt 0 ]]; then
                     :
                 else
                     kill -TERM ${_pids[${_pid_k}]}
-                    ( sleep ${_timeout}; kill -KILL ${_pids[${_pid_k}]} )&
+                    ( sleep ${_kill_timeout}; kill -KILL ${_pids[${_pid_k}]} )&
                     # saving watchdog's PID in the index of process' PID
                     _watchdog[${_pids[${_pid_k}]}]=$!
                 fi
@@ -178,5 +251,50 @@ asyncproc_term_procs() {
         done
         sleep 1
     done
-
 }
+
+asyncproc_get_exitcodes() {
+    local _pid _ec
+
+    if [[ -p ${ASYNCPROC_INPUT} ]] && [[ -p ${ASYNCPROC_HANDLER_EC_INPUT} ]]; then
+        echo "$1" > ${ASYNCPROC_HANDLER_EC_INPUT}
+        while read -u 5 _pid _ec; do
+            if [[ "${_pid}" = "end" ]]; then
+                break
+            else
+                asyncproc_exitcodes[${_pid}]=${_ec}
+            fi
+        done
+    fi
+}
+
+asyncproc_get_stdouts() {
+    local _pid _stdout
+
+    if [[ -p ${ASYNCPROC_INPUT} ]] && [[ -p ${ASYNCPROC_HANDLER_STDOUT_INPUT} ]]; then
+        echo "$1" > ${ASYNCPROC_HANDLER_STDOUT_INPUT}
+        while read -u 5 _pid _stdout; do
+            if [[ "${_pid}" = "end" ]]; then
+                break
+            else
+                asyncproc_stdouts[${_pid}]="${_stdout}"
+            fi
+        done
+    fi
+}
+
+asyncproc_get_stderrs() {
+    local _pid _stderr
+
+    if [[ -p ${ASYNCPROC_INPUT} ]] && [[ -p ${ASYNCPROC_HANDLER_STDERR_INPUT} ]]; then
+        echo "$1" > ${ASYNCPROC_HANDLER_STDERR_INPUT}
+        while read -u 5 _pid _stderr; do
+            if [[ "${_pid}" = "end" ]]; then
+                break
+            else
+                asyncproc_stderrs[${_pid}]="${_stderr}"
+            fi
+        done
+    fi
+}
+
