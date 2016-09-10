@@ -23,10 +23,6 @@ asyncproc_run()
     asyncproc_say "Exit codes: ${asyncproc_exitcodes[*]}"
     asyncproc_say "Files with Stdout: ${asyncproc_stdouts[*]}"
     asyncproc_say "Files with Stderr: ${asyncproc_stderrs[*]}"
-    asyncproc_workers=()
-    asyncproc_exitcodes=()
-    asyncproc_stdouts=()
-    asyncproc_stderrs=()
 
     echo 1237 114 > ${ASYNCPROC_HANDLER_EC_INPUT}
     echo 1238 130 > ${ASYNCPROC_HANDLER_EC_INPUT}
@@ -36,6 +32,10 @@ asyncproc_run()
     echo 1239 Info about something > ${ASYNCPROC_HANDLER_STDOUT_INPUT}
     echo 1238 The file does not exist > ${ASYNCPROC_HANDLER_STDERR_INPUT}
 }
+
+#asyncproc_handler_ec_add_local() {
+#    [[ $3 -ne 0 ]] && { echo "!!! BING !!! (${asyncproc_main_pid})"; kill -USR1 $$; }
+#}
 
 asyncproc_start
 asyncproc_run
