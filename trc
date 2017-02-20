@@ -24,9 +24,9 @@ fi
 main() {
     trap '_exitcode=$?; hook_main_exit; exit $_exitcode' EXIT
 
-    export SELF_NAME=$(basename -s .sh $0) # Self name for logging purpose
+    export SELF_NAME=$(basename $0) # Self name for logging purpose
     export DIR_NAME=$(dirname $0)
-    export MAINPID="$BASHPID" # PID of the main process
+    export MAINPID="$$" # PID of the main process
     childpid="" # Collecting child processes
     ns="main" # Name Space
     local _wait_bg_cmd _file _exitcode=0 _exitcode2=0
@@ -137,7 +137,7 @@ main() {
 
 say() {
     if [ "$RC_VERBOSE" = "true" ]; then
-        echo "$(date '+%Y-%m-%d %H:%M:%S') ($SECONDS sec) ${SELF_NAME} [$ns/$BASHPID]: $@"
+        echo "$(date '+%Y-%m-%d %H:%M:%S') ($SECONDS sec) ${SELF_NAME} [$ns]: $@"
     fi
 }
 
